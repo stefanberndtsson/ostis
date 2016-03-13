@@ -13,6 +13,7 @@
 #include "ikbd.h"
 #include "instr.h"
 #include "state.h"
+#include "gemdos.h"
 #if TEST_BUILD
 #include "tests/test_main.h"
 #endif
@@ -177,6 +178,9 @@ static void cpu_do_exception(int vnum)
   } else if(vnum >= 25 && vnum <= 31) {
     cpu_exception_interrupt(vnum);
   } else {
+    if(vnum == 33) {
+      gemdos_print(cpu);
+    }
     cpu_exception_general(vnum);
   }
 }
@@ -936,4 +940,5 @@ void cpu_state_restore(struct cpu_state *state)
   //    interrupt_pending[r] = state_read_mem_long(&state->data[STATE_INTPEND+r*4]);
   //  }
 }
+
 

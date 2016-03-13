@@ -17,7 +17,7 @@ PARSERFILE=expr.y expr.l
 PARSERSRC=expr.tab.c lex.expr.c
 PARSEROBJ=$(PARSERSRC:.c=.o)
 
-SRC=mmu.c mmu_fallback.c ram.c rom.c cpu.c cartridge.c psg.c mfp.c shifter.c screen.c \
+SRC=mmu.c mmu_fallback.c ram.c rom.c cpu.c cartridge.c psg.c mfp.c shifter.c screen.c gemdos.c \
     midi.c ikbd.c dma.c fdc.c hdc.c rtc.c floppy.c floppy_st.c floppy_msa.c floppy_stx.c event.c \
     state.c prefs.c cprint.c diag.c acia.c glue.c
 SRC_TEST=tests/test_main.c
