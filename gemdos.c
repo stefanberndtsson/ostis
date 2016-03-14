@@ -1,3 +1,9 @@
+#include <glob.h>
+#include <unistd.h>
+#include <time.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <errno.h>
 #include "common.h"
 #include "cpu.h"
 #include "gemdos.h"
@@ -7,23 +13,45 @@
 #define SPWORD(x) mmu_read_word_print(SP(x))
 #define SPLONG(x) mmu_read_long_print(SP(x))
 
+#define GEMDOS_BASEDIR "/var/tmp/HD/"
+#define GEMDOS_NO_FILE 0
+#define GEMDOS_FILE_OK 1
+
 #define DRIVE_C 2
 #define DRIVE_N 14
 
 #define GEMDOS_DSETDRV  0x0e
 #define GEMDOS_DGETDRV  0x19
+#define GEMDOS_FSETDTA  0x1a
 #define GEMDOS_DSETPATH 0x3b
 #define GEMDOS_FOPEN    0x3d
+#define GEMDOS_FCLOSE   0x3e
 #define GEMDOS_FREAD    0x3f
+#define GEMDOS_FSFIRST  0x4e
+#define GEMDOS_FSNEXT   0x4f
 
 #define GEMDOS_E_OK      0
 #define GEMDOS_EFILNF  -33
 #define GEMDOS_EPTHNF  -34
+#define GEMDOS_ENHNDL  -35
 #define GEMDOS_EIHNDL  -37
+#define GEMDOS_ENMFIL  -49
 
 static int drive_selected = 0;
 static char current_path[1024] = "";
 static FILE *handles[1024] = {};
+static LONG dta = 0;
+static glob_t globbuf;
+static int globpos = 0;
+
+struct dta {
+  BYTE d_reserved[21];
+  BYTE d_attrib;
+  WORD d_time;
+  WORD d_date;
+  LONG d_length;
+  BYTE d_fname[14];
+};
 
 int gemdos_hd_drive()
 {
@@ -85,12 +113,214 @@ static int gemdos_dsetpath(struct cpu *cpu)
   return GEMDOS_ABORT_CALL;
 }
 
+static int find_free_handle()
+{
+  int i;
+  for(i=2;i<1024;i++) {
+    if(!handles[i]) return i;
+  }
+  return 0;
+}
+
+static int gemdos_fsetdta(struct cpu *cpu)
+{
+  if(!drive_selected) {
+    return GEMDOS_RESUME_CALL;
+  }
+
+  dta = SPLONG(2);
+
+  return GEMDOS_ABORT_CALL;
+}
+
+static WORD dta_time(time_t mtime)
+{
+  struct tm *tm;
+  WORD dtime;
+  tm = localtime(&mtime);
+
+  dtime = tm->tm_hour << 11;
+  dtime |= tm->tm_min << 5;
+  dtime |= tm->tm_sec >> 1;
+
+  return dtime;
+}
+
+static WORD dta_date(time_t mtime)
+{
+  struct tm *tm;
+  WORD ddate;
+  tm = localtime(&mtime);
+
+  ddate = (tm->tm_year + 1900 - 1980)<<9;
+  ddate |= (tm->tm_mon+1) << 5;
+  ddate |= tm->tm_mday;
+
+  return ddate;
+}
+
+static int dta_write()
+{
+  int i,j,skip;
+  char *filename;
+  struct stat buf;
+  BYTE attrib = 0;
+  int size;
+
+  for(i=globpos;i<globbuf.gl_pathc;i++) {
+    skip = 0;
+    filename = globbuf.gl_pathv[i];
+    if(strlen(filename) > 12) {
+      printf("DEBUG: Skipping %s due to length\n", filename);
+      skip = 1;
+      continue;
+    }
+    for(j=0;j<strlen(filename);j++) {
+      if(!(((filename[j] >= '0') && (filename[j] <= '9')) ||
+           ((filename[j] >= 'A') && (filename[j] <= 'Z')) ||
+           (filename[j] == '_') || (filename[j] == '-') ||
+           (filename[j] == '.'))) {
+        printf("DEBUG: Skipping %s due to bad characters\n", filename);
+        skip = 1;
+        break;
+      }
+    }
+    if(skip) continue;
+
+    stat(filename, &buf);
+    if(!S_ISREG(buf.st_mode) && !S_ISDIR(buf.st_mode)) {
+      skip = 1;
+      printf("DEBUG: Skipping %s due to not being file or directory: %08x\n", filename, buf.st_mode);
+      continue;
+    }
+
+    if(buf.st_mode & S_IFDIR) {
+      attrib |= 0x10;
+    }
+    size = buf.st_size;
+    mmu_write_byte(dta + 21, attrib);
+    mmu_write_word(dta + 22, dta_time(buf.st_mtime));
+    mmu_write_word(dta + 24, dta_date(buf.st_mtime));
+    mmu_write_long(dta + 26, size);
+    for(j=0;j<strlen(filename);j++) {
+      mmu_write_byte(dta + 30 + j, filename[j]);
+    }
+    mmu_write_byte(dta + 30 + j, 0);
+    globpos = i+1;
+    break;
+  }
+
+  if(skip) {
+    return GEMDOS_NO_FILE;
+  } else {
+    return GEMDOS_FILE_OK;
+  }
+}
+
+static int gemdos_fsfirst(struct cpu *cpu)
+{
+  int i;
+  WORD attr;
+  LONG filename_addr;
+  char filename[1024];
+  char *pwd;
+  int content_offset = 0;
+  
+  if(!drive_selected) {
+    return GEMDOS_RESUME_CALL;
+  }
+
+  pwd = getcwd(NULL, 1024);
+  if(!pwd) {
+    printf("DEBUG: getcwd fail: %s\n", strerror(errno));
+  }
+
+  if(chdir(GEMDOS_BASEDIR)) {
+    printf("DEBUG: CHDIR fail\n");
+  }
+  
+  filename_addr = SPLONG(2);
+  attr = SPWORD(6);
+
+  content_offset = 0;
+  //  snprintf(filename, strlen(GEMDOS_BASEDIR)+1, GEMDOS_BASEDIR);
+  for(i=0;i<1024;i++) {
+    BYTE tmp;
+    tmp = mmu_read_byte_print(filename_addr+i);
+    if(i == 2 && tmp == '\\' && filename[i+content_offset-1] == ':') {
+      content_offset -= 3;
+      continue;
+    }
+    if(tmp == '\\') {
+      tmp = '/';
+    }
+    if(tmp == '*') {
+      if(filename[i+content_offset-1] == '.' && filename[i+content_offset-2] == '*') {
+        content_offset -= 2;
+        continue;
+      }
+    }
+    filename[i+content_offset] = tmp;
+    if(!filename[i+content_offset]) break;
+  }
+
+  globpos = 0;
+  glob(filename, 0, NULL, &globbuf);
+  if(globbuf.gl_pathc == 0) {
+    set_return_long(cpu, GEMDOS_ENMFIL);
+  } else {
+    if(dta_write()) {
+      set_return_long(cpu, GEMDOS_E_OK);
+    } else {
+      set_return_long(cpu, GEMDOS_ENMFIL);
+    }
+  }
+  
+  i = attr; /* Dummy */
+  
+  if(chdir(pwd)) {
+    printf("DEBUG: CHDIR fail\n");
+  }
+  
+  return GEMDOS_ABORT_CALL;
+}
+
+static int gemdos_fsnext(struct cpu *cpu)
+{
+  char *pwd;
+  if(!drive_selected) {
+    return GEMDOS_RESUME_CALL;
+  }
+
+  pwd = getcwd(NULL, 1024);
+  if(!pwd) {
+    printf("DEBUG: getcwd fail: %s\n", strerror(errno));
+  }
+
+  if(chdir(GEMDOS_BASEDIR)) {
+    printf("DEBUG: CHDIR fail\n");
+  }
+  
+  if(dta_write()) {
+    set_return_long(cpu, GEMDOS_E_OK);
+  } else {
+    set_return_long(cpu, GEMDOS_ENMFIL);
+  }
+
+  if(chdir(pwd)) {
+    printf("DEBUG: CHDIR fail\n");
+  }
+  
+return GEMDOS_ABORT_CALL;
+}
+
 static int gemdos_fopen(struct cpu *cpu)
 {
   int i;
   WORD mode;
   LONG fname_addr;
   char fname[1024];
+  int handle;
 
   if(!drive_selected) {
     return GEMDOS_RESUME_CALL;
@@ -103,21 +333,28 @@ static int gemdos_fopen(struct cpu *cpu)
     return GEMDOS_RESUME_CALL;
   }
   
-  snprintf(fname, 13, "/var/tmp/HD/");
+  snprintf(fname, strlen(GEMDOS_BASEDIR)+1, GEMDOS_BASEDIR);
   for(i=0;i<1024;i++) {
     BYTE tmp;
     tmp = mmu_read_byte_print(fname_addr+i);
     if(tmp == '\\') {
       tmp = '/';
     }
-    fname[i+12] = tmp;
-    if(!fname[i+12]) break;
+    fname[i+strlen(GEMDOS_BASEDIR)] = tmp;
+    if(!fname[i+strlen(GEMDOS_BASEDIR)]) break;
   }
 
-  handles[2] = fopen(fname, "rb");
+  handle = find_free_handle();
+  
+  if(!handle) {
+    set_return_long(cpu, GEMDOS_ENHNDL);
+    return GEMDOS_ABORT_CALL;
+  }
+  
+  handles[handle] = fopen(fname, "rb");
   printf("DEBUG: fname == %s\n", fname);
-  if(handles[2]) {
-    set_return_long(cpu, 2);
+  if(handles[handle]) {
+    set_return_long(cpu, handle);
   } else {
     set_return_long(cpu, GEMDOS_EFILNF);
   }
@@ -152,10 +389,28 @@ static int gemdos_fread(struct cpu *cpu)
   printf("DEBUG: bytes_read: %d\n", bytes_read);
   cpu_enter_debugger();
   
-  for(i=0;i<(int)count;i++) {
+  for(i=0;i<count;i++) {
     mmu_write_byte(buf+i, tmpdata[i]);
   }
   set_return_long(cpu, bytes_read);
+  return GEMDOS_ABORT_CALL;
+}
+
+int gemdos_fclose(struct cpu *cpu)
+{
+  WORD handle;
+
+  if(!drive_selected) {
+    return GEMDOS_RESUME_CALL;
+  }
+
+  handle = SPWORD(2);
+  if(handles[handle]) {
+    handles[handle] = NULL;
+    set_return_long(cpu, GEMDOS_E_OK);
+  } else {
+    set_return_long(cpu, GEMDOS_EIHNDL);
+  }
   return GEMDOS_ABORT_CALL;
 }
 
@@ -168,8 +423,16 @@ int gemdos_hd(struct cpu *cpu)
     return gemdos_dgetdrv(cpu);
   case GEMDOS_DSETPATH:
     return gemdos_dsetpath(cpu);
+  case GEMDOS_FSETDTA:
+    return gemdos_fsetdta(cpu);
+  case GEMDOS_FSFIRST:
+    return gemdos_fsfirst(cpu);
+  case GEMDOS_FSNEXT:
+    return gemdos_fsnext(cpu);
   case GEMDOS_FOPEN:
     return gemdos_fopen(cpu);
+  case GEMDOS_FCLOSE:
+    return gemdos_fclose(cpu);
   case GEMDOS_FREAD:
     return gemdos_fread(cpu);
   }
@@ -344,12 +607,20 @@ static void gemdos_fclose_print(struct cpu *cpu)
   printf("Fclose(%d)\n", handle);
 }
 
+static void gemdos_pterm0_print(struct cpu *cpu)
+{
+  printf("Pterm0()\n");
+}
+
 void gemdos_print(struct cpu *cpu)
 {
   int cmd;
 
   cmd = mmu_read_word_print(SP(0));
   switch(cmd) {
+  case 0x00:
+    gemdos_pterm0_print(cpu);
+    break;
   case 0x0e:
     gemdos_dsetdrv_print(cpu);
     break;
@@ -394,6 +665,6 @@ void gemdos_print(struct cpu *cpu)
     break;
   default:
     printf("CMD: %d [%04x]\n", cmd, cmd);
-    exit(-1);
+    //    exit(-1);
   }
 }
