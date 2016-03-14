@@ -180,8 +180,15 @@ static void cpu_do_exception(int vnum)
   } else {
     if(vnum == 33) {
       gemdos_print(cpu);
+      if(gemdos_hd(cpu) == GEMDOS_RESUME_CALL) {
+        cpu_exception_general(vnum);
+      } else {
+        /* Call was handled within gemdos_hd(), abort pending exception */
+        cpu_clr_exception(vnum);
+      }
+    } else {
+      cpu_exception_general(vnum);
     }
-    cpu_exception_general(vnum);
   }
 }
 

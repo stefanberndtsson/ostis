@@ -5,6 +5,7 @@
 #include "mmu.h"
 #include "state.h"
 #include "diag.h"
+#include "gemdos.h"
 
 #define RAMSIZE (4*1048576)-8
 #define RAMBASE 8
@@ -22,9 +23,21 @@ static BYTE *real(LONG addr)
   return memory+addr-RAMBASE;
 }
 
+/* 
+ *  ABCD EFGH IJKL MNOP
+ */
+
 static BYTE ram_read_byte(LONG addr)
 {
+  int drivenum = gemdos_hd_drive();
   if(addr > RAM_PHYSMAX) return 0;
+  if(drivenum) {
+    if(drivenum > 7 && drivenum < 16 && addr == 0x4c4) {
+      return (1<<(drivenum-8));
+    } else if(drivenum < 8 && addr == 0x4c5) {
+      return *(real(addr)) | (1<<drivenum);
+    }
+  }
   return *(real(addr));
 }
 
