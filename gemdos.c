@@ -38,7 +38,7 @@
 #define GEMDOS_ENMFIL  -49
 
 static int drive_selected = 0;
-static char current_path[1024] = "";
+static char current_path[1024];
 static FILE *handles[1024] = {};
 static LONG dta = 0;
 static glob_t globbuf;
@@ -56,6 +56,55 @@ struct dta {
 int gemdos_hd_drive()
 {
   return DRIVE_C;
+}
+
+static char *host_path(char *basedir, char *tos_path)
+{
+  int i;
+  int content_offset = 0;
+  static char new_path[2048] = "";
+  
+  if(!tos_path || strlen(tos_path) == 0) {
+    return basedir;
+  }
+
+  if(strlen(tos_path) == 2 || strlen(tos_path) == 3) {
+    if(tos_path[1] == ':' && (tos_path[2] == '\0' || tos_path[2] == '\\')) {
+      return basedir;
+    }
+  }
+
+  if(strlen(tos_path) > 3 && tos_path[1] == ':') {
+    tos_path += 3;
+  }
+  
+  strcat(new_path, basedir);
+  content_offset = strlen(basedir);
+
+  for(i=0;i<1024-strlen(new_path);i++) {
+    char tmp;
+
+    tmp = tos_path[i];
+    if(tmp == '\\') {
+      tmp = '/';
+    }
+
+    /* Truncate "*.*" to just "*" */
+    if(tmp == '*') {
+      if(new_path[i+content_offset-1] == '.' && new_path[i+content_offset-2] == '*') {
+        content_offset -= 2;
+        continue;
+      }
+    }
+
+    new_path[i+content_offset] = tmp;
+    if(!new_path[i+content_offset]) break;
+  }
+
+  if(new_path[strlen(new_path)-1] == '/' && new_path[strlen(new_path)-2] == '/') {
+    new_path[strlen(new_path)-1] = '\0';
+  }
+  return new_path;
 }
 
 static void set_return_word(struct cpu *cpu, WORD value)
@@ -102,7 +151,7 @@ static int gemdos_dsetpath(struct cpu *cpu)
     return GEMDOS_RESUME_CALL;
   }
   
-  path_addr = SPWORD(2);
+  path_addr = SPLONG(2);
   
   for(i=0;i<1024;i++) {
     current_path[i] = mmu_read_byte_print(path_addr+i);
@@ -163,13 +212,17 @@ static int dta_write()
 {
   int i,j,skip;
   char *filename;
+  char *dirname;
   struct stat buf;
   BYTE attrib = 0;
   int size;
 
+  dirname = host_path(GEMDOS_BASEDIR, current_path);
+
   for(i=globpos;i<globbuf.gl_pathc;i++) {
     skip = 0;
     filename = globbuf.gl_pathv[i];
+    filename += strlen(dirname);
     if(strlen(filename) > 12) {
       printf("DEBUG: Skipping %s due to length\n", filename);
       skip = 1;
@@ -187,7 +240,7 @@ static int dta_write()
     }
     if(skip) continue;
 
-    stat(filename, &buf);
+    stat(globbuf.gl_pathv[i], &buf);
     if(!S_ISREG(buf.st_mode) && !S_ISDIR(buf.st_mode)) {
       skip = 1;
       printf("DEBUG: Skipping %s due to not being file or directory: %08x\n", filename, buf.st_mode);
@@ -243,10 +296,10 @@ static int gemdos_fsfirst(struct cpu *cpu)
   attr = SPWORD(6);
 
   content_offset = 0;
-  //  snprintf(filename, strlen(GEMDOS_BASEDIR)+1, GEMDOS_BASEDIR);
   for(i=0;i<1024;i++) {
     BYTE tmp;
     tmp = mmu_read_byte_print(filename_addr+i);
+#if 0
     if(i == 2 && tmp == '\\' && filename[i+content_offset-1] == ':') {
       content_offset -= 3;
       continue;
@@ -260,12 +313,13 @@ static int gemdos_fsfirst(struct cpu *cpu)
         continue;
       }
     }
+#endif
     filename[i+content_offset] = tmp;
     if(!filename[i+content_offset]) break;
   }
 
   globpos = 0;
-  glob(filename, 0, NULL, &globbuf);
+  glob(host_path(GEMDOS_BASEDIR, filename), 0, NULL, &globbuf);
   if(globbuf.gl_pathc == 0) {
     set_return_long(cpu, GEMDOS_ENMFIL);
   } else {
