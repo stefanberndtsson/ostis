@@ -18,7 +18,7 @@
 #define GEMDOS_FILE_OK 1
 
 #define DRIVE_C 2
-#define DRIVE_N 14
+#define DRIVE_N 13
 
 #define GEMDOS_DSETDRV  0x0e
 #define GEMDOS_DGETDRV  0x19
@@ -39,7 +39,7 @@
 
 static int drive_selected = 0;
 static char current_path[1024];
-static FILE *handles[1024] = {};
+static FILE *handles[2048] = {};
 static LONG dta = 0;
 static glob_t globbuf;
 static int globpos = 0;
@@ -55,7 +55,28 @@ struct dta {
 
 int gemdos_hd_drive()
 {
-  return DRIVE_C;
+  return DRIVE_N;
+}
+
+static int path_on_gemdos_drive(char *tos_path)
+{
+  /* No path */
+  if(!tos_path || strlen(tos_path) == 0) {
+    return 0;
+  }
+
+  /* No drive letter, "drive_selected" will do */
+  if(tos_path[1] != ':') {
+    return drive_selected;
+  }
+
+  /* Drive letter, check if ours */
+  if(tos_path[0] == 'A'+gemdos_hd_drive()) {
+    return 1;
+  }
+
+  /* Nope, not ours */
+  return 0;
 }
 
 static char *host_path(char *basedir, char *tos_path)
@@ -63,7 +84,7 @@ static char *host_path(char *basedir, char *tos_path)
   int i;
   int content_offset = 0;
   static char new_path[2048] = "";
-  
+
   if(!tos_path || strlen(tos_path) == 0) {
     return basedir;
   }
@@ -165,7 +186,7 @@ static int gemdos_dsetpath(struct cpu *cpu)
 static int find_free_handle()
 {
   int i;
-  for(i=2;i<1024;i++) {
+  for(i=1024;i<2048;i++) {
     if(!handles[i]) return i;
   }
   return 0;
@@ -279,10 +300,6 @@ static int gemdos_fsfirst(struct cpu *cpu)
   char *pwd;
   int content_offset = 0;
   
-  if(!drive_selected) {
-    return GEMDOS_RESUME_CALL;
-  }
-
   pwd = getcwd(NULL, 1024);
   if(!pwd) {
     printf("DEBUG: getcwd fail: %s\n", strerror(errno));
@@ -297,27 +314,14 @@ static int gemdos_fsfirst(struct cpu *cpu)
 
   content_offset = 0;
   for(i=0;i<1024;i++) {
-    BYTE tmp;
-    tmp = mmu_read_byte_print(filename_addr+i);
-#if 0
-    if(i == 2 && tmp == '\\' && filename[i+content_offset-1] == ':') {
-      content_offset -= 3;
-      continue;
-    }
-    if(tmp == '\\') {
-      tmp = '/';
-    }
-    if(tmp == '*') {
-      if(filename[i+content_offset-1] == '.' && filename[i+content_offset-2] == '*') {
-        content_offset -= 2;
-        continue;
-      }
-    }
-#endif
-    filename[i+content_offset] = tmp;
+    filename[i+content_offset] = mmu_read_byte_print(filename_addr+i);
     if(!filename[i+content_offset]) break;
   }
 
+  if(!path_on_gemdos_drive(filename)) {
+    return GEMDOS_RESUME_CALL;
+  }
+  
   globpos = 0;
   glob(host_path(GEMDOS_BASEDIR, filename), 0, NULL, &globbuf);
   if(globbuf.gl_pathc == 0) {
@@ -376,10 +380,6 @@ static int gemdos_fopen(struct cpu *cpu)
   char fname[1024];
   int handle;
 
-  if(!drive_selected) {
-    return GEMDOS_RESUME_CALL;
-  }
-
   fname_addr = SPLONG(2);
   mode = SPWORD(6);
 
@@ -387,17 +387,25 @@ static int gemdos_fopen(struct cpu *cpu)
     return GEMDOS_RESUME_CALL;
   }
   
-  snprintf(fname, strlen(GEMDOS_BASEDIR)+1, GEMDOS_BASEDIR);
+  //  snprintf(fname, strlen(GEMDOS_BASEDIR)+1, GEMDOS_BASEDIR);
   for(i=0;i<1024;i++) {
     BYTE tmp;
     tmp = mmu_read_byte_print(fname_addr+i);
+#if 0
     if(tmp == '\\') {
       tmp = '/';
     }
     fname[i+strlen(GEMDOS_BASEDIR)] = tmp;
     if(!fname[i+strlen(GEMDOS_BASEDIR)]) break;
+#endif
+    fname[i] = tmp;
+    if(!fname[i]) break;
   }
 
+  if(!path_on_gemdos_drive(fname)) {
+    return GEMDOS_RESUME_CALL;
+  }
+  
   handle = find_free_handle();
   
   if(!handle) {
@@ -405,8 +413,8 @@ static int gemdos_fopen(struct cpu *cpu)
     return GEMDOS_ABORT_CALL;
   }
   
-  handles[handle] = fopen(fname, "rb");
-  printf("DEBUG: fname == %s\n", fname);
+  handles[handle] = fopen(host_path(GEMDOS_BASEDIR, fname), "rb");
+  printf("DEBUG: fname == %s => %s\n", fname, host_path(GEMDOS_BASEDIR, fname));
   if(handles[handle]) {
     set_return_long(cpu, handle);
   } else {
@@ -424,17 +432,12 @@ static int gemdos_fread(struct cpu *cpu)
   BYTE *tmpdata;
   int bytes_read;
 
-  if(!drive_selected) {
-    return GEMDOS_RESUME_CALL;
-  }
-  
   handle = SPWORD(2);
   count = SPLONG(4);
   buf = SPLONG(8);
 
   if(!handles[handle]) {
-    set_return_long(cpu, GEMDOS_EIHNDL);
-    return GEMDOS_ABORT_CALL;
+    return GEMDOS_RESUME_CALL;
   }
   
   tmpdata = malloc(count);
@@ -454,16 +457,12 @@ int gemdos_fclose(struct cpu *cpu)
 {
   WORD handle;
 
-  if(!drive_selected) {
-    return GEMDOS_RESUME_CALL;
-  }
-
   handle = SPWORD(2);
   if(handles[handle]) {
     handles[handle] = NULL;
     set_return_long(cpu, GEMDOS_E_OK);
   } else {
-    set_return_long(cpu, GEMDOS_EIHNDL);
+    return GEMDOS_RESUME_CALL;
   }
   return GEMDOS_ABORT_CALL;
 }
