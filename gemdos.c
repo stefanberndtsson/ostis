@@ -13,6 +13,8 @@
 #define SPWORD(x) mmu_read_word_print(SP(x))
 #define SPLONG(x) mmu_read_long_print(SP(x))
 
+#define GEMDOS_MAX 0x57
+
 #define GEMDOS_BASEDIR "/var/tmp/HD/"
 #define GEMDOS_NO_FILE 0
 #define GEMDOS_FILE_OK 1
@@ -27,6 +29,7 @@
 #define GEMDOS_FOPEN    0x3d
 #define GEMDOS_FCLOSE   0x3e
 #define GEMDOS_FREAD    0x3f
+#define GEMDOS_PEXEC    0x4b
 #define GEMDOS_FSFIRST  0x4e
 #define GEMDOS_FSNEXT   0x4f
 
@@ -43,6 +46,82 @@ static FILE *handles[2048] = {};
 static LONG dta = 0;
 static glob_t globbuf;
 static int globpos = 0;
+
+static char *gemdos_names[GEMDOS_MAX+1] = {
+  "Pterm0", /* 0x00 */
+  "Cconin",
+  "Cconout",
+  "Cauxin",
+  "Cauxout",
+  "Cprnout",
+  "Crawio",
+  "Crawcin",
+  "Cnecin",
+  "Cconws",
+  "Cconrs", 
+  "Cconis", /* 0x0b */
+  "", "",
+  "Dsetdrv", /* 0x0e */
+  "",
+  "Cconos", /* 0x10 */
+  "Cprnos",
+  "Cauxis",
+  "Cauxos",
+  "Maddalt", /* 0x14 */
+  "", "", "", "",
+  "Dgetdrv", /* 0x19 */
+  "Fsetdta", /* 0x1a */
+  "", "", "", "", "",
+  "Super", /* 0x20 */
+  "", "", "", "", "", "", "", "", "",
+  "Tgetdate", /* 0x2a */
+  "Tsetdate",
+  "Tgettime",
+  "Tsettime", /* 0x2d */
+  "",
+  "Fgetdta", /* 0x2f */
+  "Sversion",
+  "Ptermres", /* 0x31 */
+  "", "", "", "",
+  "Dfree", /* 0x36 */
+  "", "",
+  "Dcreate", /* 0x39 */
+  "Ddelete",
+  "Dsetpath",
+  "Fcreate",
+  "Fopen",
+  "Fclose",
+  "Fread",
+  "Fwrite",
+  "Fdelete",
+  "Fseek",
+  "Fattrib",
+  "Mxalloc",
+  "Fdup",
+  "Fforce",
+  "Dgetpath",
+  "Malloc",
+  "Mfree",
+  "Mshrink",
+  "Pexec",
+  "Pterm", /* 0x4c */
+  "",
+  "Fsfirst", /* 0x4e */
+  "Fsnext", /* 0x4f */
+  "", "", "", "", "", "",
+  "Frename", /* 0x56 */
+  "Fdatime"
+};
+
+struct gemdos_call {
+  LONG addr;
+  WORD argcnt;
+  char *name;
+};
+
+static struct gemdos_call calls[GEMDOS_MAX+1];
+static struct gemdos_call *last_call;
+static int triggered_from_trap = 0;
 
 struct dta {
   BYTE d_reserved[21];
@@ -380,6 +459,7 @@ static int gemdos_fopen(struct cpu *cpu)
   char fname[1024];
   int handle;
 
+  //  cpu_enter_debugger();
   fname_addr = SPLONG(2);
   mode = SPWORD(6);
 
@@ -444,7 +524,6 @@ static int gemdos_fread(struct cpu *cpu)
   bytes_read = fread(tmpdata, 1, count, handles[handle]);
 
   printf("DEBUG: bytes_read: %d\n", bytes_read);
-  cpu_enter_debugger();
   
   for(i=0;i<count;i++) {
     mmu_write_byte(buf+i, tmpdata[i]);
@@ -465,6 +544,18 @@ int gemdos_fclose(struct cpu *cpu)
     return GEMDOS_RESUME_CALL;
   }
   return GEMDOS_ABORT_CALL;
+}
+
+int gemdos_pexec(struct cpu *cpu)
+{
+  WORD mode;
+
+  mode = SPWORD(2);
+
+  if(mode == 0) {
+    cpu_enter_debugger();
+  }
+  return GEMDOS_RESUME_CALL;
 }
 
 int gemdos_hd(struct cpu *cpu)
@@ -488,6 +579,8 @@ int gemdos_hd(struct cpu *cpu)
     return gemdos_fclose(cpu);
   case GEMDOS_FREAD:
     return gemdos_fread(cpu);
+  case GEMDOS_PEXEC:
+    return gemdos_pexec(cpu);
   }
   return GEMDOS_RESUME_CALL;
 }
@@ -631,7 +724,7 @@ static void gemdos_fopen_print(struct cpu *cpu)
 
   fname_addr = mmu_read_long_print(SP(2));
   mode = mmu_read_word_print(SP(6));
-  
+
   for(i=0;i<1024;i++) {
     fname[i] = mmu_read_byte_print(fname_addr+i);
     if(!fname[i]) break;
@@ -665,10 +758,19 @@ static void gemdos_pterm0_print(struct cpu *cpu)
   printf("Pterm0()\n");
 }
 
+static void gemdos_pterm_print(struct cpu *cpu)
+{
+  WORD retcode = mmu_read_word_print(SP(2));
+  
+  printf("Pterm(%d)\n", retcode);
+}
+
 void gemdos_print(struct cpu *cpu)
 {
   int cmd;
 
+  triggered_from_trap = 1;
+  
   cmd = mmu_read_word_print(SP(0));
   switch(cmd) {
   case 0x00:
@@ -710,6 +812,9 @@ void gemdos_print(struct cpu *cpu)
   case 0x4b:
     gemdos_pexec_print(cpu);
     break;
+  case 0x4c:
+    gemdos_pterm_print(cpu);
+    break;
   case 0x4e:
     gemdos_fsfirst_print(cpu);
     break;
@@ -717,7 +822,54 @@ void gemdos_print(struct cpu *cpu)
     gemdos_fsnext_print(cpu);
     break;
   default:
-    printf("CMD: %d [%04x]\n", cmd, cmd);
+    printf("CMD: %d [%04x] == %s\n", cmd, cmd, calls[cmd].name);
     //    exit(-1);
+  }
+}
+
+void gemdos_trace_callback(struct cpu *cpu)
+{
+  int i;
+  struct cpu tmpcpu;
+  
+  for(i=0;i<GEMDOS_MAX;i++) {
+    if(cpu->pc == calls[i].addr) {
+      if(triggered_from_trap) {
+        triggered_from_trap = 0;
+      } else {
+        tmpcpu.a[7] = cpu->a[7]+2;
+        if(i == GEMDOS_FOPEN) {
+          gemdos_fopen_print(&tmpcpu);
+        } else if(i == GEMDOS_FREAD) {
+          gemdos_fread_print(&tmpcpu);
+        } else if(i == GEMDOS_FCLOSE) {
+          gemdos_fclose_print(&tmpcpu);
+        } else {
+          printf("ADDRESS MATCH: Entering %s\n", calls[i].name);
+          printf("DEBUG: %08x\n", SPLONG(0));
+          printf("DEBUG: %08x\n", SPLONG(4));
+          printf("DEBUG: %08x\n", SPLONG(8));
+          printf("DEBUG: %08x\n", SPLONG(12));
+        }
+      }
+      last_call = &calls[i];
+    } else if(last_call && mmu_read_word_print(cpu->pc) == 0x4e75) { /* RTE */
+      printf("Exiting %s\n", last_call->name);
+      last_call = NULL;
+    }
+  }
+}
+
+void gemdos_init()
+{
+  int i;
+  LONG gemdos_call_addr;
+
+  gemdos_call_addr = 0xfe856a; /* TOS 1.04 */
+  
+  for(i=0;i<GEMDOS_MAX;i++) {
+    calls[i].addr = mmu_read_long_print(gemdos_call_addr + i*6);
+    calls[i].argcnt = mmu_read_long_print(gemdos_call_addr + i*6 + 4);
+    calls[i].name = gemdos_names[i];
   }
 }

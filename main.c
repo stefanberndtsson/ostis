@@ -28,6 +28,7 @@
 #include "debug/debug.h"
 #include "cartridge.h"
 #include "state.h"
+#include "gemdos.h"
 #if TEST_BUILD
 #include "tests/test_main.h"
 #endif
@@ -219,6 +220,7 @@ int main(int argc, char *argv[])
   screen_disable(0);
   glue_init();
   shifter_init();
+  gemdos_init();
   if(debugger) {
     debug_init();
     cpu_halt_for_debug();
