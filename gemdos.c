@@ -411,6 +411,7 @@ static int gemdos_fsfirst(struct cpu *cpu)
     set_return_long(cpu, GEMDOS_ENMFIL);
   } else {
     if(dta_write()) {
+      printf("DEBUG: We now got a file from fsfirst that matches our gemdos hd: %s\n", filename);
       set_return_long(cpu, GEMDOS_E_OK);
     } else {
       set_return_long(cpu, GEMDOS_ENMFIL);
@@ -857,32 +858,92 @@ void gemdos_trace_callback(struct cpu *cpu)
     }
   }
 
-  for(i=0;i<GEMDOS_MAX;i++) {
-    if(cpu->pc == calls[i].addr) {
-      found = 1;
-      if(triggered_from_trap) {
-        triggered_from_trap = 0;
-      } else {
-        tmpcpu.a[7] = cpu->a[7]+2;
-        if(i == GEMDOS_FOPEN) {
-          gemdos_fopen_print(&tmpcpu);
-        } else if(i == GEMDOS_FREAD) {
-          gemdos_fread_print(&tmpcpu);
-        } else if(i == GEMDOS_FCLOSE) {
-          gemdos_fclose_print(&tmpcpu);
-        } else if(i > 9) {
-          printf("ADDRESS MATCH: Entering %s\n", calls[i].name);
-          printf("DEBUG: %08x\n", SPLONG(0));
-          printf("DEBUG: %08x\n", SPLONG(4));
-          printf("DEBUG: %08x\n", SPLONG(8));
-          printf("DEBUG: %08x\n", SPLONG(12));
+  if(cpu->pc == 0xfc823a){ /* Fsfirst in TOS 1.04 */
+    printf("DEBUG: %08x\n", SPLONG(0));
+    tmpcpu.a[7] = cpu->a[7]-2;
+    printf("DEBUG: ------------------------------------------ Hijacked Fsfirst\n");
+    gemdos_fsfirst_print(&tmpcpu);
+    if(gemdos_fsfirst(&tmpcpu) == GEMDOS_ABORT_CALL) {
+      cpu->d[0] = tmpcpu.d[0];
+      cpu->pc += 6;
+      cpu_clear_prefetch();
+    }
+  } else if(cpu->pc == 0xfc86ac){ /* Fopen in TOS 1.04 */
+    tmpcpu.a[7] = cpu->a[7]-2;
+    printf("DEBUG: ------------------------------------------ Hijacked Fopen\n");
+    gemdos_fopen_print(&tmpcpu);
+    if(gemdos_fopen(&tmpcpu) == GEMDOS_ABORT_CALL) {
+      cpu->d[0] = tmpcpu.d[0];
+      cpu->pc += 6;
+      cpu_clear_prefetch();
+    }
+  } else if((cpu->pc == 0xfc86d0) ||
+            (cpu->pc == 0xfc8702 -6) ||
+            (cpu->pc == 0xfc8800 -6) ||
+            (cpu->pc == 0xfc8718 -6) ||
+            (cpu->pc == 0xfc872e -6) ||
+            (cpu->pc == 0xfc8744 -6) ||
+            (cpu->pc == 0xfc87a8 -6)
+            ){ /* Fread in TOS 1.04 */
+    tmpcpu.a[7] = cpu->a[7]-2;
+    printf("DEBUG: ------------------------------------------ Hijacked Fread\n");
+    gemdos_fread_print(&tmpcpu);
+    if(gemdos_fread(&tmpcpu) == GEMDOS_ABORT_CALL) {
+      cpu->d[0] = tmpcpu.d[0];
+      cpu->pc += 6;
+      cpu_clear_prefetch();
+    }
+  } else if((cpu->pc == 0xfc86e4) ||
+            (cpu->pc == 0xfc890c -6)
+            ){ /* Fclose in TOS 1.04 */
+    tmpcpu.a[7] = cpu->a[7]-2;
+    printf("DEBUG: ------------------------------------------ Hijacked Fclose\n");
+    gemdos_fclose_print(&tmpcpu);
+    if(gemdos_fclose(&tmpcpu) == GEMDOS_ABORT_CALL) {
+      cpu->d[0] = tmpcpu.d[0];
+      cpu->pc += 6;
+      cpu_clear_prefetch();
+    }
+  } else {
+    for(i=0;i<GEMDOS_MAX;i++) {
+      if(cpu->pc == calls[i].addr) {
+        found = 1;
+        if(triggered_from_trap) {
+          triggered_from_trap = 0;
+        } else {
+          tmpcpu.a[7] = cpu->a[7]+2;
+          if(i == GEMDOS_FOPEN) {
+            gemdos_fopen_print(&tmpcpu);
+            printf("DEBUG: %08x\n", SPLONG(0));
+            printf("DEBUG: %08x\n", SPLONG(4));
+            printf("DEBUG: %08x\n", SPLONG(8));
+            printf("DEBUG: %08x\n", SPLONG(12));
+          } else if(i == GEMDOS_FREAD) {
+            gemdos_fread_print(&tmpcpu);
+            printf("DEBUG: %08x\n", SPLONG(0));
+            printf("DEBUG: %08x\n", SPLONG(4));
+            printf("DEBUG: %08x\n", SPLONG(8));
+            printf("DEBUG: %08x\n", SPLONG(12));
+          } else if(i == GEMDOS_FCLOSE) {
+            gemdos_fclose_print(&tmpcpu);
+            printf("DEBUG: %08x\n", SPLONG(0));
+            printf("DEBUG: %08x\n", SPLONG(4));
+            printf("DEBUG: %08x\n", SPLONG(8));
+            printf("DEBUG: %08x\n", SPLONG(12));
+          } else if(i > 9) {
+            printf("ADDRESS MATCH: Entering %s\n", calls[i].name);
+            printf("DEBUG: %08x\n", SPLONG(0));
+            printf("DEBUG: %08x\n", SPLONG(4));
+            printf("DEBUG: %08x\n", SPLONG(8));
+            printf("DEBUG: %08x\n", SPLONG(12));
+          }
         }
+        last_call = &calls[i];
+      } else if(last_call && bus_read_word_print(cpu->pc) == 0x4e75) { /* RTE */
+        printf("Exiting %s\n", last_call->name);
+        last_call = NULL;
+        found = 1;
       }
-      last_call = &calls[i];
-    } else if(last_call && bus_read_word_print(cpu->pc) == 0x4e75) { /* RTE */
-      printf("Exiting %s\n", last_call->name);
-      last_call = NULL;
-      found = 1;
     }
   }
 
@@ -893,7 +954,7 @@ void gemdos_trace_callback(struct cpu *cpu)
         if(calls[i].visited[(cpu->pc-0xfc0000)/2]) {
           if(i > 9) {
             if(cpu->pc != printed) {
-              printf("DEBUG: Previously visited %06x when inside %s\n", cpu->pc, calls[i].name);
+              //              printf("DEBUG: Previously visited %06x when inside %s\n", cpu->pc, calls[i].name);
               printed = cpu->pc;
             }
           }
