@@ -116,12 +116,15 @@ static char *gemdos_names[GEMDOS_MAX+1] = {
 struct gemdos_call {
   LONG addr;
   WORD argcnt;
+  int callnum;
   char *name;
+  char visited[196608/2]; /* One byte per possible WORD in ROM */
 };
 
 static struct gemdos_call calls[GEMDOS_MAX+1];
 static struct gemdos_call *last_call;
 static int triggered_from_trap = 0;
+static LONG printed = 0;
 
 struct dta {
   BYTE d_reserved[21];
@@ -830,10 +833,32 @@ void gemdos_print(struct cpu *cpu)
 void gemdos_trace_callback(struct cpu *cpu)
 {
   int i;
+  int found = 0;
   struct cpu tmpcpu;
-  
+  WORD instr;
+  WORD offset;
+  LONG addr = 0;
+
+  if(last_call && cpu->pc >= 0xfc0000 && cpu->pc < 0xff0000) {
+    instr = mmu_read_word_print(cpu->pc);
+    if(instr == 0x4eb9) { /* JSR xxx.L */
+      addr = mmu_read_long_print(cpu->pc + 2);
+    }
+    if(instr == 0x4eba) { /* JSR xxx(PC) */
+      offset = mmu_read_word_print(cpu->pc + 2);
+      if(offset&0x8000) offset |= 0xffff0000;
+      addr = cpu->pc + offset - 2;
+    }
+    if(addr && cpu->pc >= 0xfc0000 && cpu->pc < 0xff0000) {
+      if(last_call->callnum != GEMDOS_PEXEC) {
+        last_call->visited[(addr-0xfc0000)/2] = 1;
+      }
+    }
+  }
+
   for(i=0;i<GEMDOS_MAX;i++) {
     if(cpu->pc == calls[i].addr) {
+      found = 1;
       if(triggered_from_trap) {
         triggered_from_trap = 0;
       } else {
@@ -844,7 +869,7 @@ void gemdos_trace_callback(struct cpu *cpu)
           gemdos_fread_print(&tmpcpu);
         } else if(i == GEMDOS_FCLOSE) {
           gemdos_fclose_print(&tmpcpu);
-        } else {
+        } else if(i > 9) {
           printf("ADDRESS MATCH: Entering %s\n", calls[i].name);
           printf("DEBUG: %08x\n", SPLONG(0));
           printf("DEBUG: %08x\n", SPLONG(4));
@@ -856,6 +881,23 @@ void gemdos_trace_callback(struct cpu *cpu)
     } else if(last_call && mmu_read_word_print(cpu->pc) == 0x4e75) { /* RTE */
       printf("Exiting %s\n", last_call->name);
       last_call = NULL;
+      found = 1;
+    }
+  }
+
+  if(!found) {
+    
+    for(i=0;i<GEMDOS_MAX;i++) {
+      if(cpu->pc >= 0xfc0000 && cpu->pc < 0xff0000) {
+        if(calls[i].visited[(cpu->pc-0xfc0000)/2]) {
+          if(i > 9) {
+            if(cpu->pc != printed) {
+              printf("DEBUG: Previously visited %06x when inside %s\n", cpu->pc, calls[i].name);
+              printed = cpu->pc;
+            }
+          }
+        }
+      }
     }
   }
 }
@@ -870,6 +912,8 @@ void gemdos_init()
   for(i=0;i<GEMDOS_MAX;i++) {
     calls[i].addr = mmu_read_long_print(gemdos_call_addr + i*6);
     calls[i].argcnt = mmu_read_long_print(gemdos_call_addr + i*6 + 4);
+    calls[i].callnum = i;
     calls[i].name = gemdos_names[i];
+    memset(calls[i].visited, 0, strlen(calls[i].visited));
   }
 }
