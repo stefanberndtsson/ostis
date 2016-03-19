@@ -30,6 +30,7 @@
 #define GEMDOS_FOPEN    0x3d
 #define GEMDOS_FCLOSE   0x3e
 #define GEMDOS_FREAD    0x3f
+#define GEMDOS_FSEEK    0x42
 #define GEMDOS_PEXEC    0x4b
 #define GEMDOS_FSFIRST  0x4e
 #define GEMDOS_FSNEXT   0x4f
@@ -166,6 +167,7 @@ static char *host_path(char *basedir, char *tos_path)
 {
   int i;
   int content_offset = 0;
+  static char current_tos_path[2048];
   static char new_path[2048] = "";
 
   if(!tos_path || strlen(tos_path) == 0) {
@@ -179,16 +181,30 @@ static char *host_path(char *basedir, char *tos_path)
   }
 
   if(strlen(tos_path) > 3 && tos_path[1] == ':') {
-    tos_path += 3;
+    tos_path += 2; /* Skip drive letter and ':' */
   }
-  
+  /* Absolute path, just copy it to current
+   * Relative path, first copy current_path, then append tos_path
+   * In both cases, skip first absolute path slash, since this will become
+   * a relative path in the native host sense.
+   */
+  if(tos_path[0] == '\\') {
+    strncpy(current_tos_path, tos_path+1, 2047);
+    printf("DEBUG: Adding absolute path: %s => %s\n", tos_path, current_tos_path);
+  } else {  
+    strncpy(current_tos_path, current_path+1, 2047);
+    printf("DEBUG: Adding relative path: %s => %s\n", current_path, current_tos_path);
+    strncat(current_tos_path, tos_path, 2047-strlen(current_tos_path));
+    printf("DEBUG: Appending relative path: %s => %s\n", tos_path, current_tos_path);
+  }
+
   strcat(new_path, basedir);
   content_offset = strlen(basedir);
 
   for(i=0;i<1024-strlen(new_path);i++) {
     char tmp;
 
-    tmp = tos_path[i];
+    tmp = current_tos_path[i];
     if(tmp == '\\') {
       tmp = '/';
     }
@@ -201,6 +217,10 @@ static char *host_path(char *basedir, char *tos_path)
       }
     }
 
+    if(tmp >= 'a' && tmp <= 'z') {
+      tmp = tmp - ('a' - 'A');
+    }
+
     new_path[i+content_offset] = tmp;
     if(!new_path[i+content_offset]) break;
   }
@@ -208,6 +228,9 @@ static char *host_path(char *basedir, char *tos_path)
   if(new_path[strlen(new_path)-1] == '/' && new_path[strlen(new_path)-2] == '/') {
     new_path[strlen(new_path)-1] = '\0';
   }
+
+  printf("DEBUG: host_path: current_path == %s\n", current_path);
+  printf("DEBUG: host_path %s => %s\n", current_tos_path, new_path);
   return new_path;
 }
 
@@ -277,13 +300,9 @@ static int find_free_handle()
 
 static int gemdos_fsetdta(struct cpu *cpu)
 {
-  if(!drive_selected) {
-    return GEMDOS_RESUME_CALL;
-  }
-
   dta = SPLONG(2);
 
-  return GEMDOS_ABORT_CALL;
+  return GEMDOS_RESUME_CALL;
 }
 
 static WORD dta_time(time_t mtime)
@@ -319,19 +338,27 @@ static int dta_write()
   char *dirname;
   struct stat buf;
   BYTE attrib = 0;
+  int skip_leading_slash = 0;
   int size;
 
   dirname = host_path(GEMDOS_BASEDIR, current_path);
+  if(dirname[strlen(dirname)-1] != '/') {
+    skip_leading_slash = 1;
+  }
 
   for(i=globpos;i<globbuf.gl_pathc;i++) {
     skip = 0;
     filename = globbuf.gl_pathv[i];
     filename += strlen(dirname);
+    if(skip_leading_slash && filename[0] == '/') {
+      filename++;
+    }
     if(strlen(filename) > 12) {
       printf("DEBUG: Skipping %s due to length\n", filename);
       skip = 1;
       continue;
     }
+
     for(j=0;j<strlen(filename);j++) {
       if(!(((filename[j] >= '0') && (filename[j] <= '9')) ||
            ((filename[j] >= 'A') && (filename[j] <= 'Z')) ||
@@ -404,16 +431,19 @@ static int gemdos_fsfirst(struct cpu *cpu)
   if(!path_on_gemdos_drive(filename)) {
     return GEMDOS_RESUME_CALL;
   }
-  
+
+  printf("DEBUG: FsFirst: DTA set to %06x\n", dta);
   globpos = 0;
   glob(host_path(GEMDOS_BASEDIR, filename), 0, NULL, &globbuf);
   if(globbuf.gl_pathc == 0) {
+    printf("DEBUG: Fsfirst: Glob found nothing for %s\n", filename);
     set_return_long(cpu, GEMDOS_ENMFIL);
   } else {
     if(dta_write()) {
       printf("DEBUG: We now got a file from fsfirst that matches our gemdos hd: %s\n", filename);
       set_return_long(cpu, GEMDOS_E_OK);
     } else {
+      printf("DEBUG: Fsfirst: ENMFIL for %s\n", filename);
       set_return_long(cpu, GEMDOS_ENMFIL);
     }
   }
@@ -537,6 +567,33 @@ static int gemdos_fread(struct cpu *cpu)
   return GEMDOS_ABORT_CALL;
 }
 
+int gemdos_fseek(struct cpu *cpu)
+{
+  WORD handle;
+  LONG offset;
+  WORD seekmode;
+  int ret;
+  LONG current_pos = 0;
+
+  offset = bus_read_long_print(SP(2));
+  handle = bus_read_word_print(SP(6));
+  seekmode = bus_read_word_print(SP(8));
+
+  if(handles[handle]) {
+    ret = fseek(handles[handle], offset, seekmode);
+
+    if(!ret) {
+      current_pos = ftell(handles[handle]);
+    } else {
+      current_pos = GEMDOS_EFILNF; /* ?? */
+    }
+    set_return_long(cpu, current_pos);
+  } else {
+    return GEMDOS_RESUME_CALL;
+  }
+  return GEMDOS_ABORT_CALL;
+}
+
 int gemdos_fclose(struct cpu *cpu)
 {
   WORD handle;
@@ -565,6 +622,12 @@ int gemdos_pexec(struct cpu *cpu)
 
 int gemdos_hd(struct cpu *cpu)
 {
+  printf("DEBUG: PC: %08x\n", cpu->pc);
+  printf("DEBUG: %08x\n", SPLONG(-4));
+  printf("DEBUG: %08x\n", SPLONG(0));
+  printf("DEBUG: %08x\n", SPLONG(4));
+  printf("DEBUG: %08x\n", SPLONG(8));
+  printf("DEBUG: %08x\n", SPLONG(12));
   switch(SPWORD(0)) {
   case GEMDOS_DSETDRV:
     return gemdos_dsetdrv(cpu);
@@ -584,6 +647,8 @@ int gemdos_hd(struct cpu *cpu)
     return gemdos_fclose(cpu);
   case GEMDOS_FREAD:
     return gemdos_fread(cpu);
+  case GEMDOS_FSEEK:
+    return gemdos_fseek(cpu);
   case GEMDOS_PEXEC:
     return gemdos_pexec(cpu);
   }
@@ -750,6 +815,19 @@ static void gemdos_fread_print(struct cpu *cpu)
   printf("Fread(%d, %d, $%06x)\n", handle, count, buf);
 }
 
+static void gemdos_fseek_print(struct cpu *cpu)
+{
+  WORD handle;
+  LONG offset;
+  WORD seekmode;
+
+  offset = bus_read_long_print(SP(2));
+  handle = bus_read_word_print(SP(6));
+  seekmode = bus_read_word_print(SP(8));
+  
+  printf("Fseek(%d, %d, %d)\n", offset, handle, seekmode);
+}
+
 static void gemdos_fclose_print(struct cpu *cpu)
 {
   WORD handle;
@@ -804,6 +882,9 @@ void gemdos_print(struct cpu *cpu)
     break;
   case 0x3f:
     gemdos_fread_print(cpu);
+    break;
+  case 0x42:
+    gemdos_fseek_print(cpu);
     break;
   case 0x48:
     gemdos_malloc_print(cpu);
@@ -877,11 +958,21 @@ void gemdos_trace_callback(struct cpu *cpu)
       cpu->pc += 6;
       cpu_clear_prefetch();
     }
+  } else if(cpu->pc == 0xfc8824 - 6){ /* Fseek in TOS 1.04 */
+    tmpcpu.a[7] = cpu->a[7]-2;
+    printf("DEBUG: ------------------------------------------ Hijacked Fseek\n");
+    gemdos_fseek_print(&tmpcpu);
+    if(gemdos_fseek(&tmpcpu) == GEMDOS_ABORT_CALL) {
+      cpu->d[0] = tmpcpu.d[0];
+      cpu->pc += 6;
+      cpu_clear_prefetch();
+    }
   } else if((cpu->pc == 0xfc86d0) ||
             (cpu->pc == 0xfc8702 -6) ||
             (cpu->pc == 0xfc8800 -6) ||
             (cpu->pc == 0xfc8718 -6) ||
             (cpu->pc == 0xfc872e -6) ||
+            (cpu->pc == 0xfc8838 -6) ||
             (cpu->pc == 0xfc8744 -6) ||
             (cpu->pc == 0xfc87a8 -6)
             ){ /* Fread in TOS 1.04 */
@@ -913,18 +1004,28 @@ void gemdos_trace_callback(struct cpu *cpu)
         } else {
           tmpcpu.a[7] = cpu->a[7]+2;
           if(i == GEMDOS_FOPEN) {
+            printf("DEBUG: ------------------------------------------ Internal Fopen\n");
             gemdos_fopen_print(&tmpcpu);
             printf("DEBUG: %08x\n", SPLONG(0));
             printf("DEBUG: %08x\n", SPLONG(4));
             printf("DEBUG: %08x\n", SPLONG(8));
             printf("DEBUG: %08x\n", SPLONG(12));
           } else if(i == GEMDOS_FREAD) {
+            printf("DEBUG: ------------------------------------------ Internal Fread\n");
             gemdos_fread_print(&tmpcpu);
             printf("DEBUG: %08x\n", SPLONG(0));
             printf("DEBUG: %08x\n", SPLONG(4));
             printf("DEBUG: %08x\n", SPLONG(8));
             printf("DEBUG: %08x\n", SPLONG(12));
+          } else if(i == GEMDOS_FSEEK) {
+            printf("DEBUG: ------------------------------------------ Internal Fseek\n");
+            gemdos_fseek_print(&tmpcpu);
+            printf("DEBUG: %08x\n", SPLONG(0));
+            printf("DEBUG: %08x\n", SPLONG(4));
+            printf("DEBUG: %08x\n", SPLONG(8));
+            printf("DEBUG: %08x\n", SPLONG(12));
           } else if(i == GEMDOS_FCLOSE) {
+            printf("DEBUG: ------------------------------------------ Internal Fclose\n");
             gemdos_fclose_print(&tmpcpu);
             printf("DEBUG: %08x\n", SPLONG(0));
             printf("DEBUG: %08x\n", SPLONG(4));
