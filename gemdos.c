@@ -46,6 +46,7 @@ static int drive_selected = 0;
 static char current_path[1024];
 static FILE *handles[2048] = {};
 static LONG dta = 0;
+static LONG pexec_return_addr = 0;
 static glob_t globbuf;
 static int globpos = 0;
 
@@ -615,6 +616,7 @@ int gemdos_pexec(struct cpu *cpu)
   mode = SPWORD(2);
 
   if(mode == 0) {
+    pexec_return_addr = cpu->pc;
     cpu_enter_debugger();
   }
   return GEMDOS_RESUME_CALL;
@@ -922,6 +924,10 @@ void gemdos_trace_callback(struct cpu *cpu)
   WORD offset;
   LONG addr = 0;
 
+  if(!pexec_return_addr) {
+    return;
+  }
+  
   if(last_call && cpu->pc >= 0xfc0000 && cpu->pc < 0xff0000) {
     instr = bus_read_word_print(cpu->pc);
     if(instr == 0x4eb9) { /* JSR xxx.L */
@@ -1040,10 +1046,23 @@ void gemdos_trace_callback(struct cpu *cpu)
           }
         }
         last_call = &calls[i];
-      } else if(last_call && bus_read_word_print(cpu->pc) == 0x4e75) { /* RTE */
+      } else if(last_call && bus_read_word_print(cpu->pc) == 0x4e73) { /* RTE */
         printf("Exiting %s\n", last_call->name);
         last_call = NULL;
         found = 1;
+      }
+
+      if(pexec_return_addr && cpu->pc == 0xfc9374) {
+        pexec_return_addr = 0;
+      }
+      
+      /* fc9374 == RTE after pexec */
+      if(pexec_return_addr && 
+         cpu->pc != 0xfc42a2 &&
+         cpu->pc != 0xfc07a0 &&
+         bus_read_word_print(cpu->pc) == 0x4e73) {
+        pexec_return_addr = 0;
+        printf("DEBUG: Exiting pexec? at %06x\n", cpu->pc);
       }
     }
   }
