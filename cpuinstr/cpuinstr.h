@@ -9,12 +9,14 @@ static WORD fetch_word(struct cpu *cpu)
   WORD data;
 
   data = bus_read_word(cpu->pc);
+  printf("DEBUG: fetch_word: ADDR: %06x => %04x\n", cpu->pc, data);
   cpu->pc += 2;
   return data;
 }
 
 static void set_state(struct cpu *cpu, int state)
 {
+  printf("DEBUG: set_state: %d => %d\n", cpu->instr_state, state);
   cpu->instr_state = state;
 }
 
@@ -30,10 +32,12 @@ static void write_word(struct cpu *cpu)
   if(cpu->instr_data_step < 0) {
     cpu->instr_data_ea_addr += cpu->instr_data_step;
   }
-  
+
   addr = cpu->instr_data_ea_addr;
   data = *((WORD *)cpu->instr_data_word_ptr[cpu->instr_data_word_pos]);
 
+  printf("DEBUG: write_word: Addr: %06x  %04x\n", addr, data);
+  
   bus_write_word(addr, data);
 
   /* Postinc */
