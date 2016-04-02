@@ -1,5 +1,6 @@
 #include "common.h"
 #include "cpu.h"
+#include "cpuinstr.h"
 #include "cprint.h"
 #include "mmu.h"
 #include "ea.h"
@@ -17,20 +18,6 @@
 #define MOVEM_EXTRA_READ 5
 
 #define EA_REG_IN_RMASK(rnum, rmask) (rmask&(1<<(rnum+8)))
-
-static WORD fetch_word(struct cpu *cpu)
-{
-  WORD data;
-
-  data = bus_read_word(cpu->pc);
-  cpu->pc += 2;
-  return data;
-}
-
-static void set_state(struct cpu *cpu, int state)
-{
-  cpu->instr_state = state;
-}
 
 static void parse(struct cpu *cpu, WORD op)
 {
@@ -96,30 +83,11 @@ static void parse(struct cpu *cpu, WORD op)
   cpu->instr_data_word_count = word_count;
 }
 
-static void write_word(struct cpu *cpu)
-{
-  LONG addr;
-  WORD data;
-
-  /* Predec */
-  if(cpu->instr_data_step < 0) {
-    cpu->instr_data_ea_addr += cpu->instr_data_step;
-  }
-  
-  addr = cpu->instr_data_ea_addr;
-  data = *((WORD *)cpu->instr_data_word_ptr[cpu->instr_data_word_pos]);
-
-  bus_write_word(addr, data);
-
-  /* Postinc */
-  if(cpu->instr_data_step > 0) {
-    cpu->instr_data_ea_addr += cpu->instr_data_step;
-  }
-
-  cpu->instr_data_word_pos++;
-}
-
-static void read_word(struct cpu *cpu)
+/* MOVEM needs a special version of read_word, because
+ * when instruction is operating on 16-bit reads, they
+ * (unlike MOVE) are sign extended to 32-bit.
+ */
+static void read_word_with_extend(struct cpu *cpu)
 {
   LONG addr;
   WORD data;
@@ -223,7 +191,7 @@ static void movem(struct cpu *cpu, WORD op)
     ADD_CYCLE(4);
     break;
   case MOVEM_READ:
-    read_word(cpu);
+    read_word_with_extend(cpu);
     if(cpu->instr_data_word_pos >= cpu->instr_data_word_count) {
       set_state(cpu, MOVEM_EXTRA_READ);
     }

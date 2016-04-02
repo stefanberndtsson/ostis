@@ -1403,7 +1403,7 @@ void cpu_init_clocked()
   addx_init((void *)instr_clocked, (void *)instr_print);
   abcd_init((void *)instr_clocked, (void *)instr_print);
 
-  move_init((void *)instr_clocked, (void *)instr_print);
+  move_instr_init((void *)instr_clocked, (void *)instr_print);
   movea_init((void *)instr_clocked, (void *)instr_print); /* overlaps move_init */
   move_to_sr_init((void *)instr_clocked, (void *)instr_print);
   move_from_sr_init((void *)instr_clocked, (void *)instr_print);

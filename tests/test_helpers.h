@@ -31,7 +31,7 @@ static int test_main_current_test = 0;
 #define TEST_START(tnum, text) \
   do { \
     test_main_current_test = tnum; \
-    printf("Test %d - %s", test_main_current_test, text); \
+    printf("Test %d - %-40s", test_main_current_test, text); \
   } while(0);
 
 #define TEST_END_OK \
