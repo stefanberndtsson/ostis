@@ -54,10 +54,7 @@ static void parse(struct cpu *cpu, WORD op)
 
   /* MOVE.x Dx,MEM */
   if(EA_MODE_DREG(op)) {
-    if(MOVE_SIZE_B(op)) {
-      cpu->instr_data_word_ptr[cpu->instr_data_word_pos] = DREG_LBYTE(cpu, EA_MODE_REG(op));
-    }
-    if(MOVE_SIZE_W(op)) {
+    if(MOVE_SIZE_B(op) || MOVE_SIZE_W(op)) {
       cpu->instr_data_word_ptr[cpu->instr_data_word_pos] = DREG_LWORD(cpu, EA_MODE_REG(op));
     }
     if(MOVE_SIZE_L(op)) {
