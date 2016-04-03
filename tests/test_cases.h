@@ -8,5 +8,6 @@ void test_lsl_init();
 void test_prefetch1_init();
 void test_ccpu_movem_init();
 void test_ccpu_move_1_init();
+void test_ccpu_move_2_init();
 
 #endif

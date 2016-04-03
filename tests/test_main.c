@@ -174,6 +174,7 @@ struct test_case *test_init(char *case_name)
   test_prefetch1_init();
   test_ccpu_movem_init();
   test_ccpu_move_1_init();
+  test_ccpu_move_2_init();
   current_case = find_case(case_name);
 
   return current_case;
