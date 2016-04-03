@@ -9,12 +9,12 @@
 static uint64_t tmp_cycles;
 static int test_num = 0;
 
-static void test_ccpu_move_hook_init(struct cpu *cpu)
+static void test_ccpu_move_1_hook_init(struct cpu *cpu)
 {
-  TEST_CASE_START("MOVE", "Clocked CPU - MOVE instruction");
+  TEST_CASE_START("MOVE", "Clocked CPU - MOVE instruction - Register to EA");
 }
 
-static void test_ccpu_move_setup_test1(struct cpu *cpu)
+static void test_ccpu_move_1_setup_test1(struct cpu *cpu)
 {
   cpu->d[0] = 0x55aa;
   cpu->d[1] = 0x12340000;
@@ -22,48 +22,48 @@ static void test_ccpu_move_setup_test1(struct cpu *cpu)
   cpu->d[2] = 0x87650000;
 }
 
-static void test_ccpu_move_setup_test2(struct cpu *cpu)
+static void test_ccpu_move_1_setup_test2(struct cpu *cpu)
 {
   cpu->d[0] = 0xffffff80;
   cpu->a[0] = 0x10000;
 }
 
-static void test_ccpu_move_setup_test3(struct cpu *cpu)
+static void test_ccpu_move_1_setup_test3(struct cpu *cpu)
 {
   cpu->d[0] = 0xffffff80;
   cpu->a[0] = 0x10000;
 }
 
-static void test_ccpu_move_setup_test4(struct cpu *cpu)
+static void test_ccpu_move_1_setup_test4(struct cpu *cpu)
 {
   cpu->d[0] = 0xffffff80;
   cpu->a[0] = 0x10010;
 }
 
-static void test_ccpu_move_setup_test5(struct cpu *cpu)
+static void test_ccpu_move_1_setup_test5(struct cpu *cpu)
 {
   cpu->d[0] = 0xffffff80;
   cpu->a[0] = 0x10010;
 }
 
-static void test_ccpu_move_setup_test6(struct cpu *cpu)
+static void test_ccpu_move_1_setup_test6(struct cpu *cpu)
 {
   cpu->d[0] = 0xffffff80;
   cpu->a[0] = 0x10010;
   cpu->d[1] = 0xfffffffe;
 }
 
-static void test_ccpu_move_setup_test7(struct cpu *cpu)
+static void test_ccpu_move_1_setup_test7(struct cpu *cpu)
 {
   cpu->d[0] = 0xffffff80;
 }
 
-static void test_ccpu_move_setup_test8(struct cpu *cpu)
+static void test_ccpu_move_1_setup_test8(struct cpu *cpu)
 {
   cpu->d[0] = 0xffffff80;
 }
 
-static void test_ccpu_move_verify_test1(struct cpu *cpu)
+static void test_ccpu_move_1_verify_test1(struct cpu *cpu)
 {
   uint64_t cycles;
 
@@ -76,7 +76,7 @@ static void test_ccpu_move_verify_test1(struct cpu *cpu)
   TEST_END_OK;
 }
 
-static void test_ccpu_move_verify_test2(struct cpu *cpu)
+static void test_ccpu_move_1_verify_test2(struct cpu *cpu)
 {
   WORD v1;
   uint64_t cycles;
@@ -92,7 +92,7 @@ static void test_ccpu_move_verify_test2(struct cpu *cpu)
   TEST_END_OK;
 }
 
-static void test_ccpu_move_verify_test3(struct cpu *cpu)
+static void test_ccpu_move_1_verify_test3(struct cpu *cpu)
 {
   WORD v1;
   uint64_t cycles;
@@ -108,7 +108,7 @@ static void test_ccpu_move_verify_test3(struct cpu *cpu)
   TEST_END_OK;
 }
 
-static void test_ccpu_move_verify_test4(struct cpu *cpu)
+static void test_ccpu_move_1_verify_test4(struct cpu *cpu)
 {
   WORD v1;
   uint64_t cycles;
@@ -124,7 +124,7 @@ static void test_ccpu_move_verify_test4(struct cpu *cpu)
   TEST_END_OK;
 }
 
-static void test_ccpu_move_verify_test5(struct cpu *cpu)
+static void test_ccpu_move_1_verify_test5(struct cpu *cpu)
 {
   WORD v1;
   uint64_t cycles;
@@ -140,7 +140,7 @@ static void test_ccpu_move_verify_test5(struct cpu *cpu)
   TEST_END_OK;
 }
 
-static void test_ccpu_move_verify_test6(struct cpu *cpu)
+static void test_ccpu_move_1_verify_test6(struct cpu *cpu)
 {
   WORD v1;
   uint64_t cycles;
@@ -156,7 +156,7 @@ static void test_ccpu_move_verify_test6(struct cpu *cpu)
   TEST_END_OK;
 }
 
-static void test_ccpu_move_verify_test7(struct cpu *cpu)
+static void test_ccpu_move_1_verify_test7(struct cpu *cpu)
 {
   WORD v1;
   uint64_t cycles;
@@ -171,7 +171,7 @@ static void test_ccpu_move_verify_test7(struct cpu *cpu)
   TEST_END_OK;
 }
 
-static void test_ccpu_move_verify_test8(struct cpu *cpu)
+static void test_ccpu_move_1_verify_test8(struct cpu *cpu)
 {
   WORD v1;
   uint64_t cycles;
@@ -186,90 +186,90 @@ static void test_ccpu_move_verify_test8(struct cpu *cpu)
   TEST_END_OK;
 }
 
-static void test_ccpu_move_hook_exit(struct cpu *cpu)
+static void test_ccpu_move_1_hook_exit(struct cpu *cpu)
 {
   TEST_CASE_END;
   exit(0);
 }
 
-static void test_ccpu_move_hook_reset_cycles(struct cpu *cpu)
+static void test_ccpu_move_1_hook_reset_cycles(struct cpu *cpu)
 {
   tmp_cycles = cpu->cycle;
 }
 
-static void test_ccpu_move_verify_test_dispatch(struct cpu *cpu)
+static void test_ccpu_move_1_verify_test_dispatch(struct cpu *cpu)
 {
   switch(test_num) {
   case 1:
-    test_ccpu_move_verify_test1(cpu);
+    test_ccpu_move_1_verify_test1(cpu);
     break;
   case 2:
-    test_ccpu_move_verify_test2(cpu);
+    test_ccpu_move_1_verify_test2(cpu);
     break;
   case 3:
-    test_ccpu_move_verify_test3(cpu);
+    test_ccpu_move_1_verify_test3(cpu);
     break;
   case 4:
-    test_ccpu_move_verify_test4(cpu);
+    test_ccpu_move_1_verify_test4(cpu);
     break;
   case 5:
-    test_ccpu_move_verify_test5(cpu);
+    test_ccpu_move_1_verify_test5(cpu);
     break;
   case 6:
-    test_ccpu_move_verify_test6(cpu);
+    test_ccpu_move_1_verify_test6(cpu);
     break;
   case 7:
-    test_ccpu_move_verify_test7(cpu);
+    test_ccpu_move_1_verify_test7(cpu);
     break;
   case 8:
-    test_ccpu_move_verify_test8(cpu);
+    test_ccpu_move_1_verify_test8(cpu);
     break;
   }
 }
 
-static void test_ccpu_move_setup_test_dispatch(struct cpu *cpu)
+static void test_ccpu_move_1_setup_test_dispatch(struct cpu *cpu)
 {
   test_num++;
   switch(test_num) {
   case 1:
-    test_ccpu_move_setup_test1(cpu);
+    test_ccpu_move_1_setup_test1(cpu);
     break;
   case 2:
-    test_ccpu_move_setup_test2(cpu);
+    test_ccpu_move_1_setup_test2(cpu);
     break;
   case 3:
-    test_ccpu_move_setup_test3(cpu);
+    test_ccpu_move_1_setup_test3(cpu);
     break;
   case 4:
-    test_ccpu_move_setup_test4(cpu);
+    test_ccpu_move_1_setup_test4(cpu);
     break;
   case 5:
-    test_ccpu_move_setup_test5(cpu);
+    test_ccpu_move_1_setup_test5(cpu);
     break;
   case 6:
-    test_ccpu_move_setup_test6(cpu);
+    test_ccpu_move_1_setup_test6(cpu);
     break;
   case 7:
-    test_ccpu_move_setup_test7(cpu);
+    test_ccpu_move_1_setup_test7(cpu);
     break;
   case 8:
-    test_ccpu_move_setup_test8(cpu);
+    test_ccpu_move_1_setup_test8(cpu);
     break;
   }
 
   tmp_cycles = cpu->cycle;
 }
 
-void test_ccpu_move_init()
+void test_ccpu_move_1_init()
 {
   struct test_case *test_case;
   
-  test_case = test_case_alloc("ccpu_move");
+  test_case = test_case_alloc("ccpu_move_1");
 
-  test_case->hooks[TEST_HOOK_INIT] = test_ccpu_move_hook_init;
-  test_case->hooks[TEST_HOOK_VERIFY_TEST] = test_ccpu_move_verify_test_dispatch;
-  test_case->hooks[TEST_HOOK_SETUP_TEST] = test_ccpu_move_setup_test_dispatch;
-  test_case->hooks[TEST_HOOK_EXIT] = test_ccpu_move_hook_exit;
+  test_case->hooks[TEST_HOOK_INIT] = test_ccpu_move_1_hook_init;
+  test_case->hooks[TEST_HOOK_VERIFY_TEST] = test_ccpu_move_1_verify_test_dispatch;
+  test_case->hooks[TEST_HOOK_SETUP_TEST] = test_ccpu_move_1_setup_test_dispatch;
+  test_case->hooks[TEST_HOOK_EXIT] = test_ccpu_move_1_hook_exit;
   
   test_case_register(test_case);
 }

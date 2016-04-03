@@ -45,21 +45,28 @@ static void move_regtoreg(struct cpu *cpu, WORD op)
 
 static void prepare_src(struct cpu *cpu, WORD op)
 {
+  int rnum;
   int ea_dst = EA_HIGH(op);
   int word_count = 0;
 
-  /* MOVE.x Dx,MEM */
   if(EA_MODE_DREG(op)) {
+    rnum = EA_MODE_REG(op);
+  } else if(EA_MODE_AREG(op)) {
+    rnum = EA_MODE_REG(op) + 8;
+  }
+  
+  /* MOVE.x Rx,MEM */
+  if(EA_MODE_DREG(op) || EA_MODE_AREG(op)) {
     if(MOVE_SIZE_B(op) || MOVE_SIZE_W(op)) {
-      cpu->instr_data_word_ptr[word_count++] = DREG_LWORD(cpu, EA_MODE_REG(op));
+      cpu->instr_data_word_ptr[word_count++] = REG_LWORD(cpu, rnum);
     }
     if(MOVE_SIZE_L(op)) {
       if(EA_MODE_ADEC(ea_dst)) {
-        cpu->instr_data_word_ptr[word_count++] = DREG_LWORD(cpu, EA_MODE_REG(op));
-        cpu->instr_data_word_ptr[word_count++] = DREG_HWORD(cpu, EA_MODE_REG(op));
+        cpu->instr_data_word_ptr[word_count++] = REG_LWORD(cpu, rnum);
+        cpu->instr_data_word_ptr[word_count++] = REG_HWORD(cpu, rnum);
       } else {
-        cpu->instr_data_word_ptr[word_count++] = DREG_HWORD(cpu, EA_MODE_REG(op));
-        cpu->instr_data_word_ptr[word_count++] = DREG_LWORD(cpu, EA_MODE_REG(op));
+        cpu->instr_data_word_ptr[word_count++] = REG_HWORD(cpu, rnum);
+        cpu->instr_data_word_ptr[word_count++] = REG_LWORD(cpu, rnum);
       }
     }
     cpu->instr_data_word_count = word_count;
