@@ -46,11 +46,13 @@ struct cpu {
    * instr_data_word_pos:
    * The current word in the array.
    *
-   * instr_data_ea_reg:
+   * instr_data_ea_reg/instr_data_ea_second_reg:
    * The source/destination register (main register, not offset one)
+   * For the case of MOVE, regular reg is the destination, and second is the source register
    *
    * instr_data_ea_addr:
    * The source/destination offset to value in register
+   * For the case of MOVE, regular addr is the destination, and second is the source address
    *
    * instr_data_size:
    * 0 == word
@@ -74,6 +76,8 @@ struct cpu {
   int instr_data_word_pos;
   int instr_data_ea_reg;
   LONG instr_data_ea_addr;
+  int instr_data_ea_second_reg;
+  LONG instr_data_ea_second_addr;
   int instr_data_size;
   int instr_data_step;
 };

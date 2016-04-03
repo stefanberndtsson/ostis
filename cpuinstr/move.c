@@ -16,61 +16,38 @@
 #define MOVE_DELAY    4
 #define MOVE_DELAYED  5
 
-static void parse(struct cpu *cpu, WORD op)
+#define MOVE_REGTOREG(op) ((EA_MODE_DREG(op) || EA_MODE_AREG(op)) && EA_MODE_DREG(EA_HIGH(op)))
+
+/* Special case, register to register only, no need to create
+ * memory access structures
+ */
+static void move_regtoreg(struct cpu *cpu, WORD op)
 {
   int ea_dst = EA_HIGH(op);
   int srcr;
   int dstr;
+
+  if(EA_MODE_DREG(op)) {
+    srcr = cpu->d[EA_MODE_REG(op)];
+  } else if(EA_MODE_AREG(op)) {
+    srcr = cpu->a[EA_MODE_REG(op)];
+  }
+  dstr = EA_MODE_REG(ea_dst);
+  if(MOVE_SIZE_B(op)) {
+    cpu->d[dstr] = (cpu->d[dstr]&0xffffff00)|(srcr&0xff);
+  } else if(MOVE_SIZE_W(op)) {
+    cpu->d[dstr] = (cpu->d[dstr]&0xffff0000)|(srcr&0xffff);
+  } else if(MOVE_SIZE_L(op)) {
+    cpu->d[dstr] = srcr;
+  }
+  set_state(cpu, INSTR_STATE_FINISHED);
+}
+
+static void prepare_src(struct cpu *cpu, WORD op)
+{
+  int ea_dst = EA_HIGH(op);
   int word_count = 0;
 
-  /* Special case, register to register only, no need to create
-   * memory access structures
-   */
-  if((EA_MODE_DREG(op) || EA_MODE_AREG(op)) && EA_MODE_DREG(ea_dst)) {
-    if(EA_MODE_DREG(op)) {
-      srcr = cpu->d[EA_MODE_REG(op)];
-    } else if(EA_MODE_AREG(op)) {
-      srcr = cpu->a[EA_MODE_REG(op)];
-    }
-    dstr = EA_MODE_REG(ea_dst);
-    if(MOVE_SIZE_B(op)) {
-      cpu->d[dstr] = (cpu->d[dstr]&0xffffff00)|(srcr&0xff);
-    } else if(MOVE_SIZE_W(op)) {
-      cpu->d[dstr] = (cpu->d[dstr]&0xffff0000)|(srcr&0xffff);
-    } else if(MOVE_SIZE_L(op)) {
-      cpu->d[dstr] = srcr;
-    }
-    set_state(cpu, INSTR_STATE_FINISHED);
-    return;
-  }
-
-  /* Destination to data register unimplemented for anything other than
-   * reg->reg for the moment
-   */
-  if(EA_MODE_DREG(ea_dst)) return;
-  
-  /* Destination is going on the bus, prepare the write queue with the
-   * appropriate data
-   */
-  if(EA_MODE_AMEM(ea_dst) || EA_MODE_AINC(ea_dst) || EA_MODE_ADEC(ea_dst) ||
-     EA_MODE_AOFF(ea_dst) || EA_MODE_AROF(ea_dst) || EA_MODE_SHRT(ea_dst) ||
-     EA_MODE_LONG(ea_dst)) {
-    printf("DEBUG: AMEM|AINC|ADEC|AOFF|AROF|SHRT|LONG\n");
-    cpu->instr_data_ea_reg = EA_MODE_REG(ea_dst);
-    cpu->instr_data_ea_addr = ea_addr(cpu, MOVE_SIZE(op), ea_dst, cpu->instr_data_fetch);
-    printf("DEBUG: Addr: %d %06x\n", cpu->instr_data_ea_reg, cpu->instr_data_ea_addr);
-    cpu->instr_data_step = 2;
-  }
-
-  if(EA_MODE_AINC(ea_dst)) {
-    cpu->a[EA_MODE_REG(ea_dst)] += MOVE_SIZE(op);
-  }
-
-  if(EA_MODE_ADEC(ea_dst)) {
-    cpu->instr_data_step = -2;
-    cpu->a[EA_MODE_REG(ea_dst)] -= MOVE_SIZE(op);
-  }
-  
   /* MOVE.x Dx,MEM */
   if(EA_MODE_DREG(op)) {
     if(MOVE_SIZE_B(op) || MOVE_SIZE_W(op)) {
@@ -89,6 +66,39 @@ static void parse(struct cpu *cpu, WORD op)
     cpu->instr_data_word_pos = 0;
     set_state(cpu, MOVE_WRITE);
   }
+}
+
+static void prepare_dst(struct cpu *cpu, WORD op)
+{
+  int ea_dst = EA_HIGH(op);
+
+  if(EA_MODE_AMEM(ea_dst) || EA_MODE_AINC(ea_dst) || EA_MODE_ADEC(ea_dst) ||
+     EA_MODE_AOFF(ea_dst) || EA_MODE_AROF(ea_dst) || EA_MODE_SHRT(ea_dst) ||
+     EA_MODE_LONG(ea_dst)) {
+    printf("DEBUG: AMEM|AINC|ADEC|AOFF|AROF|SHRT|LONG\n");
+    cpu->instr_data_ea_reg = EA_MODE_REG(ea_dst);
+    cpu->instr_data_ea_addr = ea_addr(cpu, MOVE_SIZE(op), ea_dst, cpu->instr_data_fetch);
+    printf("DEBUG: Addr: %d %06x\n", cpu->instr_data_ea_reg, cpu->instr_data_ea_addr);
+    cpu->instr_data_step = 2;
+  }
+
+  if(EA_MODE_AINC(ea_dst)) {
+    cpu->a[EA_MODE_REG(ea_dst)] += MOVE_SIZE(op);
+  }
+
+  if(EA_MODE_ADEC(ea_dst)) {
+    cpu->instr_data_step = -2;
+    cpu->a[EA_MODE_REG(ea_dst)] -= MOVE_SIZE(op);
+  }
+}
+
+/* Normal cases, register to memory, memory to register and memory to memory
+ * These cases require setup before execution.
+ */
+static void prepare(struct cpu *cpu, WORD op)
+{
+  prepare_dst(cpu, op);
+  prepare_src(cpu, op);
 }
 
 static void move(struct cpu *cpu, WORD op)
@@ -114,29 +124,32 @@ static void move(struct cpu *cpu, WORD op)
   case INSTR_STATE_NONE:
   case MOVE_DELAYED:
     printf("DEBUG: Initial: %d %d\n", EA_FETCH_COUNT(op), EA_FETCH_COUNT(EA_HIGH(op)));
-    tmp = EA_FETCH_COUNT(op);
-    if(tmp < 0) tmp = 0;
-    cpu->instr_data_word_count = tmp;
-    tmp = EA_FETCH_COUNT(EA_HIGH(op));
-    if(tmp < 0) tmp = 0;
-    cpu->instr_data_word_count += tmp;
-    cpu->instr_data_word_pos = 0;
-    /* EA_FETCH if there are words to fetch, otherwise,
-     * parse instruction, and start executing.
-     */
-    if(cpu->instr_data_word_count > 0) {
-      set_state(cpu, MOVE_EA_FETCH);
+    if(MOVE_REGTOREG(op)) {
+      move_regtoreg(cpu, op);
     } else {
-      parse(cpu, op);
-      /* Next state is set by parse */
+      tmp = EA_FETCH_COUNT(op);
+      if(tmp < 0) tmp = 0;
+      cpu->instr_data_word_count = tmp;
+      tmp = EA_FETCH_COUNT(EA_HIGH(op));
+      if(tmp < 0) tmp = 0;
+      cpu->instr_data_word_count += tmp;
+      cpu->instr_data_word_pos = 0;
+      /* EA_FETCH if there are words to fetch, otherwise,
+       * prepare data, and let preparation decide where to go
+       */
+      if(cpu->instr_data_word_count > 0) {
+        set_state(cpu, MOVE_EA_FETCH);
+      } else {
+        prepare(cpu, op);
+      }
     }
     ADD_CYCLE(4);
     break;
   case MOVE_EA_FETCH:
     cpu->instr_data_fetch[cpu->instr_data_word_pos++] = fetch_word(cpu);
-    /* Still EA to fetch, keep current state, otherwise move on to parse */
+    /* Still EA to fetch, keep current state, otherwise move on to preparation */
     if(cpu->instr_data_word_pos >= cpu->instr_data_word_count) {
-      parse(cpu, op);
+      prepare(cpu, op);
     }
     break;
   case MOVE_WRITE:
